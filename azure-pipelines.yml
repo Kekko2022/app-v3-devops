@@ -4,7 +4,7 @@ trigger:
 pr: none
 
 pool:
-  vmImage: ubuntu-latest
+  name: self-hosted-pool
 
 variables:
   azureServiceConnection: 'sc-obs-azure-rg'
@@ -29,57 +29,58 @@ stages:
       displayName: Build image, push to ACR and deploy to ACI
       inputs:
         azureSubscription: '$(azureServiceConnection)'
-        scriptType: 'bash'
+        scriptType: 'ps'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          set -e
+          $ErrorActionPreference = "Stop"
 
-          echo "Verifica subscription attiva"
+          Write-Host "Verifica subscription attiva"
           az account show
 
-          echo "Login ad ACR"
+          Write-Host "Login ad ACR"
           az acr login --name $(acrName)
 
-          IMAGE_TAG=$(Build.BuildId)
-          FULL_IMAGE_NAME="$(acrName).azurecr.io/$(imageName):${IMAGE_TAG}"
+          $IMAGE_TAG = "$(Build.BuildId)"
+          $FULL_IMAGE_NAME = "$(acrName).azurecr.io/$(imageName):$IMAGE_TAG"
 
-          echo "Build immagine ${FULL_IMAGE_NAME}"
-          docker build -t ${FULL_IMAGE_NAME} .
+          Write-Host "Build immagine $FULL_IMAGE_NAME"
+          docker build -t $FULL_IMAGE_NAME .
 
-          echo "Push immagine ${FULL_IMAGE_NAME}"
-          docker push ${FULL_IMAGE_NAME}
+          Write-Host "Push immagine $FULL_IMAGE_NAME"
+          docker push $FULL_IMAGE_NAME
 
-          echo "Recupero credenziali ACR"
-          ACR_USER=$(az acr credential show --name $(acrName) --query username -o tsv)
-          ACR_PASS=$(az acr credential show --name $(acrName) --query "passwords[0].value" -o tsv)
+          Write-Host "Recupero credenziali ACR"
+          $ACR_USER = az acr credential show --name $(acrName) --query username -o tsv
+          $ACR_PASS = az acr credential show --name $(acrName) --query "passwords[0].value" -o tsv
 
-          echo "Elimino eventuale container precedente"
-          az container delete \
-            --resource-group $(resourceGroupName) \
-            --name $(aciName) \
-            --yes || true
+          Write-Host "Elimino eventuale container precedente"
+          az container delete `
+            --resource-group $(resourceGroupName) `
+            --name $(aciName) `
+            --yes `
+            --no-wait
 
-          echo "Creo nuovo container su ACI"
-          az container create \
-            --resource-group $(resourceGroupName) \
-            --name $(aciName) \
-            --image ${FULL_IMAGE_NAME} \
-            --cpu 1 \
-            --memory 1.5 \
-            --ports $(containerPort) \
-            --ip-address Public \
-            --dns-name-label $(aciDnsName) \
-            --location $(location) \
-            --registry-login-server $(acrName).azurecr.io \
-            --registry-username ${ACR_USER} \
-            --registry-password ${ACR_PASS} \
+          Write-Host "Creo nuovo container su ACI"
+          az container create `
+            --resource-group $(resourceGroupName) `
+            --name $(aciName) `
+            --image $FULL_IMAGE_NAME `
+            --cpu 1 `
+            --memory 1.5 `
+            --ports $(containerPort) `
+            --ip-address Public `
+            --dns-name-label $(aciDnsName) `
+            --location $(location) `
+            --registry-login-server "$(acrName).azurecr.io" `
+            --registry-username $ACR_USER `
+            --registry-password $ACR_PASS `
             --environment-variables PORT=$(containerPort)
 
-          echo "Recupero FQDN"
-          FQDN=$(az container show \
-            --resource-group $(resourceGroupName) \
-            --name $(aciName) \
-            --query ipAddress.fqdn \
-            -o tsv)
+          Write-Host "Recupero FQDN"
+          $FQDN = az container show `
+            --resource-group $(resourceGroupName) `
+            --name $(aciName) `
+            --query ipAddress.fqdn `
+            -o tsv
 
-          echo "Applicazione disponibile su: http://${FQDN}:$(containerPort)"
+          Write-Host "Applicazione disponibile su: http://$FQDN:$(containerPort)"
