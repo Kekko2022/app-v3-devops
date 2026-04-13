@@ -1,0 +1,85 @@
+trigger:
+  - main
+
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  azureServiceConnection: 'sc-obs-azure-rg'
+  resourceGroupName: 'rg-observability-dev'
+  acrName: 'nomeregistry'
+  imageName: 'obsapp-v3'
+  aciName: 'obsapp-v3-aci'
+  aciDnsName: 'obsappv3-NOMEUNIVOCO'
+  location: 'westeurope'
+  containerPort: '8000'
+
+stages:
+- stage: BuildAndDeploy
+  displayName: Build, Push and Deploy
+  jobs:
+  - job: BuildPushDeploy
+    displayName: Build image, push to ACR, deploy to ACI
+    steps:
+    - checkout: self
+
+    - task: AzureCLI@2
+      displayName: Build image, push to ACR and deploy to ACI
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          set -e
+
+          echo "Verifica subscription attiva"
+          az account show
+
+          echo "Login ad ACR"
+          az acr login --name $(acrName)
+
+          IMAGE_TAG=$(Build.BuildId)
+          FULL_IMAGE_NAME="$(acrName).azurecr.io/$(imageName):${IMAGE_TAG}"
+
+          echo "Build immagine ${FULL_IMAGE_NAME}"
+          docker build -t ${FULL_IMAGE_NAME} .
+
+          echo "Push immagine ${FULL_IMAGE_NAME}"
+          docker push ${FULL_IMAGE_NAME}
+
+          echo "Recupero credenziali ACR"
+          ACR_USER=$(az acr credential show --name $(acrName) --query username -o tsv)
+          ACR_PASS=$(az acr credential show --name $(acrName) --query "passwords[0].value" -o tsv)
+
+          echo "Elimino eventuale container precedente"
+          az container delete \
+            --resource-group $(resourceGroupName) \
+            --name $(aciName) \
+            --yes || true
+
+          echo "Creo nuovo container su ACI"
+          az container create \
+            --resource-group $(resourceGroupName) \
+            --name $(aciName) \
+            --image ${FULL_IMAGE_NAME} \
+            --cpu 1 \
+            --memory 1.5 \
+            --ports $(containerPort) \
+            --ip-address Public \
+            --dns-name-label $(aciDnsName) \
+            --location $(location) \
+            --registry-login-server $(acrName).azurecr.io \
+            --registry-username ${ACR_USER} \
+            --registry-password ${ACR_PASS} \
+            --environment-variables PORT=$(containerPort)
+
+          echo "Recupero FQDN"
+          FQDN=$(az container show \
+            --resource-group $(resourceGroupName) \
+            --name $(aciName) \
+            --query ipAddress.fqdn \
+            -o tsv)
+
+          echo "Applicazione disponibile su: http://${FQDN}:$(containerPort)"
