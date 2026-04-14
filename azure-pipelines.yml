@@ -66,10 +66,10 @@ stages:
           az container create --resource-group $(resourceGroupName) --name $(aciName) --image $FULL_IMAGE_NAME --cpu 1 --memory 1.5 --ports $(containerPort) --ip-address Public --dns-name-label $DNS_NAME --location $(location) --registry-login-server "$(acrName).azurecr.io" --registry-username $ACR_USER --registry-password $ACR_PASS --environment-variables PORT=$(containerPort) --os-type Linux
 
           Write-Host "Recupero FQDN"
-          $FQDN=$(az container show \
-            --resource-group $(resourceGroupName) \
-            --name $(aciName) \
-            --query ipAddress.fqdn \
-            -o tsv)
+          $FQDN = az container show `
+            --resource-group $(resourceGroupName) `
+            --name $(aciName) `
+            --query ipAddress.fqdn `
+            -o tsv
 
           Write-Host "Applicazione disponibile su: http://$FQDN:$(containerPort)"
