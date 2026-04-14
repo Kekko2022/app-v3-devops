@@ -58,7 +58,6 @@ stages:
             --resource-group $(resourceGroupName) `
             --name $(aciName) `
             --yes `
-            --no-wait
 
           Write-Host "Creo nuovo container su ACI"
           az container create `
