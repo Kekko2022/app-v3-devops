@@ -43,6 +43,9 @@ stages:
           $IMAGE_TAG = "$(Build.BuildId)"
           $FULL_IMAGE_NAME = "$(acrName).azurecr.io/$(imageName):$IMAGE_TAG"
 
+          # 🔥 DNS dinamico (FIX ERRORE)
+          $DNS_NAME = "$(aciDnsName)-$IMAGE_TAG"
+
           Write-Host "Build immagine $FULL_IMAGE_NAME"
           docker build -t $FULL_IMAGE_NAME .
 
@@ -60,21 +63,7 @@ stages:
             --yes
 
           Write-Host "Creo nuovo container su ACI"
-          az container create `
-            --resource-group $(resourceGroupName) `
-            --name $(aciName) `
-            --image $FULL_IMAGE_NAME `
-            --cpu 1 `
-            --memory 1.5 `
-            --ports $(containerPort) `
-            --ip-address Public `
-            --dns-name-label $(aciDnsName) `
-            --location $(location) `
-            --registry-login-server "$(acrName).azurecr.io" `
-            --registry-username $ACR_USER `
-            --registry-password $ACR_PASS `
-            --environment-variables PORT=$(containerPort) `
-            --os-type Linux
+          az container create --resource-group $(resourceGroupName) --name $(aciName) --image $FULL_IMAGE_NAME --cpu 1 --memory 1.5 --ports $(containerPort) --ip-address Public --dns-name-label $DNS_NAME --location $(location) --registry-login-server "$(acrName).azurecr.io" --registry-username $ACR_USER --registry-password $ACR_PASS --environment-variables PORT=$(containerPort) --os-type Linux
 
           Write-Host "Recupero FQDN"
           $FQDN = az container show `
