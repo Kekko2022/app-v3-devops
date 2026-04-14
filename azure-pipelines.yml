@@ -57,7 +57,7 @@ stages:
           az container delete `
             --resource-group $(resourceGroupName) `
             --name $(aciName) `
-            --yes `
+            --yes
 
           Write-Host "Creo nuovo container su ACI"
           az container create `
@@ -73,7 +73,8 @@ stages:
             --registry-login-server "$(acrName).azurecr.io" `
             --registry-username $ACR_USER `
             --registry-password $ACR_PASS `
-            --environment-variables PORT=$(containerPort)
+            --environment-variables PORT=$(containerPort) `
+            --os-type Linux
 
           Write-Host "Recupero FQDN"
           $FQDN = az container show `
