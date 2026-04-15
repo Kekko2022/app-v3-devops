@@ -13,7 +13,7 @@ variables:
   imageName: 'obsapp-v3'
   imageTag: '$(Build.BuildId)'
   aciName: 'obsapp-v3-aci'
-  aciDnsName: 'obsapp-francesco-devops'
+  aciDnsName: 'obsapp-francesco-devops-11'
   location: 'westeurope'
   containerPort: '8000'
 
