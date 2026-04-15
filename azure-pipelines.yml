@@ -100,6 +100,7 @@ stages:
         scriptType: 'ps'
         scriptLocation: 'inlineScript'
         inlineScript: |
+          Write-Host "Recupero FQDN"
           $FQDN = az container show `
             --resource-group $(resourceGroupName) `
             --name $(aciName) `
@@ -111,10 +112,43 @@ stages:
             exit 1
           }
 
+          # -----------------------------
+          # WAIT CONTAINER RUNNING
+          # -----------------------------
+          Write-Host "Attendo che il container sia in stato Running..."
+
+          $STATE = ""
+          for ($i = 0; $i -lt 12; $i++) {
+            $STATE = az container show `
+              --resource-group $(resourceGroupName) `
+              --name $(aciName) `
+              --query instanceView.state `
+              -o tsv
+
+            if ($STATE -eq "Running") {
+              Write-Host "Container RUNNING"
+              break
+            }
+
+            Write-Host "Stato: $STATE - attendo..."
+            Start-Sleep -Seconds 10
+          }
+
+          if ($STATE -ne "Running") {
+            Write-Host "Il container non è mai arrivato in RUNNING"
+            az container logs `
+              --resource-group $(resourceGroupName) `
+              --name $(aciName)
+            exit 1
+          }
+
+          # -----------------------------
+          # TEST APP
+          # -----------------------------
           $APP_URL = "http://$FQDN:$(containerPort)"
 
-          Write-Host "Attendo..."
-          Start-Sleep -Seconds 15
+          Write-Host "Attendo warm-up applicazione..."
+          Start-Sleep -Seconds 10
 
           Write-Host "Test /health"
           Invoke-WebRequest "$APP_URL/health"
