@@ -22,133 +22,115 @@ stages:
   displayName: Build and Push
   jobs:
   - job: BuildPush
-    displayName: Build image and push to ACR
     steps:
     - checkout: self
 
     - task: AzureCLI@2
-      displayName: Login to Azure and ACR, then build and push image
-      inputs:
-        azureSubscription: '$(azureServiceConnection)'
-        scriptType: 'bash'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          set -e
-
-          echo "Subscription attiva"
-          az account show
-
-          echo "Login ACR"
-          az acr login --name $(acrName)
-
-          FULL_IMAGE_NAME="$(acrName).azurecr.io/$(imageName):$(imageTag)"
-
-          echo "Build immagine: ${FULL_IMAGE_NAME}"
-          docker build -t ${FULL_IMAGE_NAME} .
-
-          echo "Push immagine: ${FULL_IMAGE_NAME}"
-          docker push ${FULL_IMAGE_NAME}
-
-- stage: Deploy
-  displayName: Deploy to ACI
-  dependsOn: Build
-  condition: succeeded()
-  jobs:
-  - job: DeployACI
-    displayName: Deploy container to Azure Container Instances
-    steps:
-    - checkout: self
-
-    - task: AzureCLI@2
-      displayName: Deploy image from ACR to ACI
-      inputs:
-        azureSubscription: '$(azureServiceConnection)'
-        scriptType: 'bash'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          set -e
-
-          FULL_IMAGE_NAME="$(acrName).azurecr.io/$(imageName):$(imageTag)"
-
-          echo "Recupero credenziali ACR"
-          ACR_USER=$(az acr credential show --name $(acrName) --query username -o tsv)
-          ACR_PASS=$(az acr credential show --name $(acrName) --query "passwords[0].value" -o tsv)
-
-          echo "Elimino eventuale container precedente"
-          az container delete \
-            --resource-group $(resourceGroupName) \
-            --name $(aciName) \
-            --yes || true
-
-          echo "Creo il nuovo container"
-          az container create \
-            --resource-group $(resourceGroupName) \
-            --name $(aciName) \
-            --image ${FULL_IMAGE_NAME} \
-            --cpu 1 \
-            --memory 1.5 \
-            --ports $(containerPort) \
-            --ip-address Public \
-            --dns-name-label $(aciDnsName) \
-            --location $(location) \
-            --registry-login-server $(acrName).azurecr.io \
-            --registry-username ${ACR_USER} \
-            --registry-password ${ACR_PASS} \
-            --environment-variables PORT=$(containerPort)
-
-- stage: SmokeTest
-  displayName: Verify deployment
-  dependsOn: Deploy
-  condition: succeeded()
-  jobs:
-  - job: VerifyACI
-    displayName: Run smoke tests against deployed app
-    steps:
-    - task: AzureCLI@2
-      displayName: Recover FQDN and test application
+      displayName: Build and Push
       inputs:
         azureSubscription: '$(azureServiceConnection)'
         scriptType: 'ps'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          set -e
+          Write-Host "Login ACR"
+          az acr login --name $(acrName)
 
-          FQDN=$(az container show \
-            --resource-group $(resourceGroupName) \
-            --name $(aciName) \
-            --query ipAddress.fqdn \
-            -o tsv)
+          $FULL_IMAGE_NAME = "$(acrName).azurecr.io/$(imageName):$(imageTag)"
 
-          if [ -z "$FQDN" ]; then
-            echo "FQDN non disponibile"
+          Write-Host "Build $FULL_IMAGE_NAME"
+          docker build -t $FULL_IMAGE_NAME .
+
+          Write-Host "Push $FULL_IMAGE_NAME"
+          docker push $FULL_IMAGE_NAME
+
+# -------------------------
+
+- stage: Deploy
+  dependsOn: Build
+  jobs:
+  - job: DeployACI
+    steps:
+    - task: AzureCLI@2
+      displayName: Deploy ACI
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: 'ps'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          $FULL_IMAGE_NAME = "$(acrName).azurecr.io/$(imageName):$(imageTag)"
+
+          Write-Host "Recupero credenziali ACR"
+          $ACR_USER = az acr credential show --name $(acrName) --query username -o tsv
+          $ACR_PASS = az acr credential show --name $(acrName) --query "passwords[0].value" -o tsv
+
+          Write-Host "Elimino container vecchio"
+          az container delete `
+            --resource-group $(resourceGroupName) `
+            --name $(aciName) `
+            --yes
+
+          Write-Host "Creo container"
+          az container create `
+            --resource-group $(resourceGroupName) `
+            --name $(aciName) `
+            --image $FULL_IMAGE_NAME `
+            --cpu 1 `
+            --memory 1.5 `
+            --ports $(containerPort) `
+            --ip-address Public `
+            --dns-name-label $(aciDnsName) `
+            --location $(location) `
+            --registry-login-server "$(acrName).azurecr.io" `
+            --registry-username $ACR_USER `
+            --registry-password $ACR_PASS `
+            --environment-variables PORT=$(containerPort)
+
+# -------------------------
+
+- stage: SmokeTest
+  dependsOn: Deploy
+  jobs:
+  - job: VerifyACI
+    steps:
+    - task: AzureCLI@2
+      displayName: Smoke Test
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: 'ps'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          $FQDN = az container show `
+            --resource-group $(resourceGroupName) `
+            --name $(aciName) `
+            --query ipAddress.fqdn `
+            -o tsv
+
+          if (-not $FQDN) {
+            Write-Host "FQDN non disponibile"
             exit 1
-          fi
+          }
 
-          APP_URL="http://${FQDN}:$(containerPort)"
+          $APP_URL = "http://$FQDN:$(containerPort)"
 
-          echo "Attendo alcuni secondi prima dei test"
-          sleep 15
+          Write-Host "Attendo..."
+          Start-Sleep -Seconds 15
 
-          echo "Test /health"
-          curl --fail --silent --show-error "${APP_URL}/health"
-          echo
+          Write-Host "Test /health"
+          Invoke-WebRequest "$APP_URL/health"
 
-          echo "Test /"
-          curl --fail --silent --show-error "${APP_URL}/"
-          echo
+          Write-Host "Test /"
+          Invoke-WebRequest "$APP_URL/"
 
-          echo "Test /time"
-          curl --fail --silent --show-error "${APP_URL}/time"
-          echo
+          Write-Host "Test /time"
+          Invoke-WebRequest "$APP_URL/time"
 
-          echo "Test POST /echo"
-          curl --fail --silent --show-error \
-            -X POST "${APP_URL}/echo" \
-            -H 'Content-Type: application/json' \
-            -d '{"lab":"02","check":"smoke-test"}'
-          echo
+          Write-Host "Test POST /echo"
+          Invoke-WebRequest "$APP_URL/echo" `
+            -Method POST `
+            -Body '{"lab":"02"}' `
+            -ContentType "application/json"
 
-          echo "Lettura log container"
-          az container logs \
-            --resource-group $(resourceGroupName) \
+          Write-Host "Log container"
+          az container logs `
+            --resource-group $(resourceGroupName) `
             --name $(aciName)
