@@ -4,16 +4,16 @@ trigger:
 pr: none
 
 pool:
-  vmImage: self-hosted-pool
+  vmImage: ubuntu-latest
 
 variables:
   azureServiceConnection: 'sc-obs-azure-rg'
-  resourceGroupName: 'rg-observability-dev'
-  acrName: 'nomeregistry'
+  resourceGroupName: 'rg-observability-lab12-standalone'
+  acrName: 'obsacrc830a3'
   imageName: 'obsapp-v3'
   imageTag: '$(Build.BuildId)'
   aciName: 'obsapp-v3-aci'
-  aciDnsName: 'obsappv3-NOMEUNIVOCO'
+  aciDnsName: 'obsapp-francesco-devops'
   location: 'westeurope'
   containerPort: '8000'
 
