@@ -174,19 +174,20 @@ stages:
           # TESTS
           # -------------------------
           Write-Host "Test /health"
-          Invoke-WebRequest "$APP_URL/health"
+          Invoke-WebRequest "$APP_URL/health" -UseBasicParsing
 
           Write-Host "Test /"
-          Invoke-WebRequest "$APP_URL/"
+          Invoke-WebRequest "$APP_URL/" -UseBasicParsing
 
           Write-Host "Test /time"
-          Invoke-WebRequest "$APP_URL/time"
+          Invoke-WebRequest "$APP_URL/time" -UseBasicParsing
 
           Write-Host "Test POST /echo"
           Invoke-WebRequest "$APP_URL/echo" `
             -Method POST `
             -Body '{"lab":"02"}' `
-            -ContentType "application/json"
+            -ContentType "application/json" `
+            -UseBasicParsing
 
           Write-Host "Logs container"
           az container logs `
