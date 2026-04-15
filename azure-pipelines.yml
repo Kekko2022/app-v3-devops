@@ -4,86 +4,151 @@ trigger:
 pr: none
 
 pool:
-  name: self-hosted-pool
+  vmImage: self-hosted-pool
 
 variables:
   azureServiceConnection: 'sc-obs-azure-rg'
-  resourceGroupName: 'rg-observability-lab12-standalone'
-  acrName: 'obsacrc830a3'
+  resourceGroupName: 'rg-observability-dev'
+  acrName: 'nomeregistry'
   imageName: 'obsapp-v3'
+  imageTag: '$(Build.BuildId)'
   aciName: 'obsapp-v3-aci'
-  aciDnsName: 'obsapp-francesco-devops'
+  aciDnsName: 'obsappv3-NOMEUNIVOCO'
   location: 'westeurope'
   containerPort: '8000'
 
 stages:
-- stage: BuildAndDeploy
-  displayName: Build, Push and Deploy
+- stage: Build
+  displayName: Build and Push
   jobs:
-  - job: BuildPushDeploy
-    displayName: Build image, push to ACR, deploy to ACI
+  - job: BuildPush
+    displayName: Build image and push to ACR
     steps:
     - checkout: self
 
     - task: AzureCLI@2
-      displayName: Build image, push to ACR and deploy to ACI
+      displayName: Login to Azure and ACR, then build and push image
       inputs:
         azureSubscription: '$(azureServiceConnection)'
-        scriptType: 'ps'
+        scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          $ErrorActionPreference = "Stop"
+          set -e
 
-          Write-Host "Verifica subscription attiva"
+          echo "Subscription attiva"
           az account show
 
-          Write-Host "Login ad ACR"
+          echo "Login ACR"
           az acr login --name $(acrName)
 
-          $IMAGE_TAG = "$(Build.BuildId)"
-          $FULL_IMAGE_NAME = "$(acrName).azurecr.io/$(imageName):$IMAGE_TAG"
+          FULL_IMAGE_NAME="$(acrName).azurecr.io/$(imageName):$(imageTag)"
 
-          # 🔥 DNS dinamico (FIX ERRORE)
-          $DNS_NAME = "$(aciDnsName)-$IMAGE_TAG"
+          echo "Build immagine: ${FULL_IMAGE_NAME}"
+          docker build -t ${FULL_IMAGE_NAME} .
 
-          Write-Host "Build immagine $FULL_IMAGE_NAME"
-          docker build -t $FULL_IMAGE_NAME .
+          echo "Push immagine: ${FULL_IMAGE_NAME}"
+          docker push ${FULL_IMAGE_NAME}
 
-          Write-Host "Push immagine $FULL_IMAGE_NAME"
-          docker push $FULL_IMAGE_NAME
+- stage: Deploy
+  displayName: Deploy to ACI
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - job: DeployACI
+    displayName: Deploy container to Azure Container Instances
+    steps:
+    - checkout: self
 
-          Write-Host "Recupero credenziali ACR"
-          $ACR_USER = az acr credential show --name $(acrName) --query username -o tsv
-          $ACR_PASS = az acr credential show --name $(acrName) --query "passwords[0].value" -o tsv
+    - task: AzureCLI@2
+      displayName: Deploy image from ACR to ACI
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          set -e
 
-          Write-Host "Elimino eventuale container precedente"
-          az container delete `
-            --resource-group $(resourceGroupName) `
-            --name $(aciName) `
-            --yes
+          FULL_IMAGE_NAME="$(acrName).azurecr.io/$(imageName):$(imageTag)"
 
-          Write-Host "Creo nuovo container su ACI"
-            az container create `
-              --resource-group $(resourceGroupName) `
-              --name $(aciName) `
-              --image $FULL_IMAGE_NAME ` 
-              --cpu 1 `
-              --memory 1.5 `
-              --ports $(containerPort) `
-              --ip-address Public `
-              --dns-name-label $DNS_NAME `
-              --location $(location) `
-              --registry-login-server "$(acrName).azurecr.io" `
-              --registry-username $ACR_USER `
-              --registry-password $ACR_PASS `
-              --environment-variables PORT=$(containerPort) `
-              --os-type Linux
+          echo "Recupero credenziali ACR"
+          ACR_USER=$(az acr credential show --name $(acrName) --query username -o tsv)
+          ACR_PASS=$(az acr credential show --name $(acrName) --query "passwords[0].value" -o tsv)
 
-          Write-Host "Recupero FQDN"
-          $FQDN = az container show `
-            --resource-group $(resourceGroupName) `
-            --name $(aciName) `
-            --query ipAddress.fqdn `
-            -o tsv
+          echo "Elimino eventuale container precedente"
+          az container delete \
+            --resource-group $(resourceGroupName) \
+            --name $(aciName) \
+            --yes || true
 
-          Write-Host "Applicazione disponibile su: http://$FQDN:$(containerPort)"
+          echo "Creo il nuovo container"
+          az container create \
+            --resource-group $(resourceGroupName) \
+            --name $(aciName) \
+            --image ${FULL_IMAGE_NAME} \
+            --cpu 1 \
+            --memory 1.5 \
+            --ports $(containerPort) \
+            --ip-address Public \
+            --dns-name-label $(aciDnsName) \
+            --location $(location) \
+            --registry-login-server $(acrName).azurecr.io \
+            --registry-username ${ACR_USER} \
+            --registry-password ${ACR_PASS} \
+            --environment-variables PORT=$(containerPort)
+
+- stage: SmokeTest
+  displayName: Verify deployment
+  dependsOn: Deploy
+  condition: succeeded()
+  jobs:
+  - job: VerifyACI
+    displayName: Run smoke tests against deployed app
+    steps:
+    - task: AzureCLI@2
+      displayName: Recover FQDN and test application
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          set -e
+
+          FQDN=$(az container show \
+            --resource-group $(resourceGroupName) \
+            --name $(aciName) \
+            --query ipAddress.fqdn \
+            -o tsv)
+
+          if [ -z "$FQDN" ]; then
+            echo "FQDN non disponibile"
+            exit 1
+          fi
+
+          APP_URL="http://${FQDN}:$(containerPort)"
+
+          echo "Attendo alcuni secondi prima dei test"
+          sleep 15
+
+          echo "Test /health"
+          curl --fail --silent --show-error "${APP_URL}/health"
+          echo
+
+          echo "Test /"
+          curl --fail --silent --show-error "${APP_URL}/"
+          echo
+
+          echo "Test /time"
+          curl --fail --silent --show-error "${APP_URL}/time"
+          echo
+
+          echo "Test POST /echo"
+          curl --fail --silent --show-error \
+            -X POST "${APP_URL}/echo" \
+            -H 'Content-Type: application/json' \
+            -d '{"lab":"02","check":"smoke-test"}'
+          echo
+
+          echo "Lettura log container"
+          az container logs \
+            --resource-group $(resourceGroupName) \
+            --name $(aciName)
