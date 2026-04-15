@@ -108,7 +108,7 @@ stages:
       displayName: Recover FQDN and test application
       inputs:
         azureSubscription: '$(azureServiceConnection)'
-        scriptType: 'bash'
+        scriptType: 'ps'
         scriptLocation: 'inlineScript'
         inlineScript: |
           set -e
