@@ -92,7 +92,7 @@ stages:
             --os-type Linux
 
 # -------------------------
-# SMOKE TEST (FIXED)
+# SMOKE TEST (FIX DEFINITIVO)
 # -------------------------
 - stage: SmokeTest
   dependsOn: Deploy
@@ -136,18 +136,21 @@ stages:
           }
 
           # -------------------------
-          # FQDN SAFE (FIX)
+          # FQDN SAFE FIX
           # -------------------------
           Write-Host "Recupero FQDN..."
+
           $FQDN = az container show `
             --resource-group $(resourceGroupName) `
             --name $(aciName) `
             --query ipAddress.fqdn `
             -o tsv
 
-          $FQDN = $FQDN.Trim()
+          # CLEAN ROBUSTO (FIX IMPORTANTE)
+          $FQDN = $FQDN.ToString().Trim()
+          $FQDN = $FQDN -replace "`r","" -replace "`n",""
 
-          Write-Host "FQDN = '$FQDN'"
+          Write-Host "FQDN RAW = [$FQDN]"
 
           if ([string]::IsNullOrWhiteSpace($FQDN)) {
             Write-Host "FQDN NON valido"
@@ -157,8 +160,10 @@ stages:
             exit 1
           }
 
-          $APP_URL = "http://$FQDN:$(containerPort)"
-          Write-Host "APP_URL = $APP_URL"
+          # FIX INTERPOLAZIONE POWERSHELL
+          $APP_URL = "http://$($FQDN):$(containerPort)"
+
+          Write-Host "APP_URL = [$APP_URL]"
 
           # -------------------------
           # WARMUP
@@ -166,7 +171,7 @@ stages:
           Start-Sleep -Seconds 10
 
           # -------------------------
-          # TEST
+          # TESTS
           # -------------------------
           Write-Host "Test /health"
           Invoke-WebRequest "$APP_URL/health"
