@@ -18,6 +18,10 @@ variables:
   containerPort: '8000'
 
 stages:
+
+# -------------------------
+# BUILD
+# -------------------------
 - stage: Build
   displayName: Build and Push
   jobs:
@@ -44,7 +48,8 @@ stages:
           docker push $FULL_IMAGE_NAME
 
 # -------------------------
-
+# DEPLOY
+# -------------------------
 - stage: Deploy
   dependsOn: Build
   jobs:
@@ -87,7 +92,8 @@ stages:
             --os-type Linux
 
 # -------------------------
-
+# SMOKE TEST (FIXED)
+# -------------------------
 - stage: SmokeTest
   dependsOn: Deploy
   jobs:
@@ -100,22 +106,8 @@ stages:
         scriptType: 'ps'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          Write-Host "Recupero FQDN"
-          $FQDN = az container show `
-            --resource-group $(resourceGroupName) `
-            --name $(aciName) `
-            --query ipAddress.fqdn `
-            -o tsv
 
-          if (-not $FQDN) {
-            Write-Host "FQDN non disponibile"
-            exit 1
-          }
-
-          # -----------------------------
-          # WAIT CONTAINER RUNNING
-          # -----------------------------
-          Write-Host "Attendo che il container sia in stato Running..."
+          Write-Host "Attendo container RUNNING..."
 
           $STATE = ""
           for ($i = 0; $i -lt 12; $i++) {
@@ -125,31 +117,57 @@ stages:
               --query instanceView.state `
               -o tsv
 
+            Write-Host "Stato: $STATE"
+
             if ($STATE -eq "Running") {
               Write-Host "Container RUNNING"
               break
             }
 
-            Write-Host "Stato: $STATE - attendo..."
             Start-Sleep -Seconds 10
           }
 
           if ($STATE -ne "Running") {
-            Write-Host "Il container non è mai arrivato in RUNNING"
+            Write-Host "Container NON RUNNING"
             az container logs `
               --resource-group $(resourceGroupName) `
               --name $(aciName)
             exit 1
           }
 
-          # -----------------------------
-          # TEST APP
-          # -----------------------------
-          $APP_URL = "http://$FQDN:$(containerPort)"
+          # -------------------------
+          # FQDN SAFE (FIX)
+          # -------------------------
+          Write-Host "Recupero FQDN..."
+          $FQDN = az container show `
+            --resource-group $(resourceGroupName) `
+            --name $(aciName) `
+            --query ipAddress.fqdn `
+            -o tsv
 
-          Write-Host "Attendo warm-up applicazione..."
+          $FQDN = $FQDN.Trim()
+
+          Write-Host "FQDN = '$FQDN'"
+
+          if ([string]::IsNullOrWhiteSpace($FQDN)) {
+            Write-Host "FQDN NON valido"
+            az container logs `
+              --resource-group $(resourceGroupName) `
+              --name $(aciName)
+            exit 1
+          }
+
+          $APP_URL = "http://$FQDN:$(containerPort)"
+          Write-Host "APP_URL = $APP_URL"
+
+          # -------------------------
+          # WARMUP
+          # -------------------------
           Start-Sleep -Seconds 10
 
+          # -------------------------
+          # TEST
+          # -------------------------
           Write-Host "Test /health"
           Invoke-WebRequest "$APP_URL/health"
 
@@ -165,7 +183,7 @@ stages:
             -Body '{"lab":"02"}' `
             -ContentType "application/json"
 
-          Write-Host "Log container"
+          Write-Host "Logs container"
           az container logs `
             --resource-group $(resourceGroupName) `
             --name $(aciName)
